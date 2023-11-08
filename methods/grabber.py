@@ -2,6 +2,7 @@ import json
 import time
 import requests
 from tqdm import tqdm
+import pandas as pd
 
 try:
     auth = json.load(open("access_token.json", "r"))
@@ -45,6 +46,7 @@ def user_request(user_id):
         'fields': '''sex,
                     bdate,
                     city,
+                    home_town,
                     country,
                     activities,
                     books,
@@ -52,25 +54,18 @@ def user_request(user_id):
                     connections,
                     counters,
                     education,
-                    exports,
+                    military,
                     followers_count,
                     friend_status,
-                    has_photo,
-                    has_mobile,
-                    home_town,
                     schools,
                     verified,
                     games,
                     interests,
-                    military,
                     movies,
                     music,
                     occupation,
                     personal,
                     relation,
-                    relatives,
-                    timezone,
-                    tv,
                     universities''',
         'access_token': access_token,
         'v': '5.131',
@@ -87,7 +82,7 @@ def user_request(user_id):
     return data
 
 
-def get_items_of_page(group_id, count=5):
+def get_items_of_page(group_id, count=10):
     params = {
         'owner_id': '-' + group_id,
         'count': count,
@@ -104,17 +99,36 @@ def get_items_of_page(group_id, count=5):
     if 'response' in data:
         posts = data['response']['items']
         print(posts[0]["id"])
-        for post in tqdm(posts, leave=True):
+        for post in tqdm(posts):
             user_likes = likes_request(group_id, post["id"])
             like_data[str(post["id"])] = user_likes
             users_set.update(user_likes)
-            time.sleep(0.1)
-        for user in tqdm(list(users_set), leave=True):
+            time.sleep(0.4)
+        for user in tqdm(list(users_set)):
             user_info.append(user_request(user))
-            time.sleep(0.1)
+            time.sleep(0.4)
     else:
         print("Произошла ошибка")
     return like_data, list(users_set), user_info
+
+def get_groups_user_follows(user_id):
+    params = {
+    'user_ids': user_id,
+    
+    'access_token': access_token,
+    'v': '5.131',
+    }
+    response = requests.get(
+        'https://api.vk.com/method/users.get',
+        params=params, timeout=50)
+    data = response.json()
+    if ('response' in data):
+        data = data['response'][0]
+    else:
+        print("WARNING", data)
+        data = {}
+    return data
+
 
 
 def likes_request(group_id, post_id):
@@ -139,9 +153,9 @@ def likes_request(group_id, post_id):
         raise Exception(data)
     return list_of_likes
 
-
+# grab user profiles and their likes in current gr
 def grabb_users_and_likes(group_id="94"):
-    iteraction_info = get_items_of_page(group_id=group_id)
+    iteraction_info = get_items_of_page(group_id=group_id, count=100)
     result_recsys = {"group": group_id, "users_likes": iteraction_info[0]}
     result_tables = {"group": group_id, "user_info": iteraction_info[2]}
     with open("data/user_likes.json", "w") as f:
@@ -150,3 +164,30 @@ def grabb_users_and_likes(group_id="94"):
         json.dump(result_tables, f)
     return True
 
+def preprocess_tabular_data():
+    df = json.load(open("data/user_info.json","r",encoding='utf-8'))["user_info"]
+    df = pd.json_normalize(df)
+    df = df.drop(columns=["can_access_closed", 
+                      "personal", 
+                      "relation_partner.id", 
+                      'relation_partner.first_name', 
+                      'relation_partner.last_name'])
+    df.loc[~pd.isna(df["relation"]) & (df["relation"]==0), "relation"] = None
+    def bdate_year_parser(bday):
+        if pd.isna(bday):
+            return None
+        bday = bday.split(".")
+        if len(bday) == 3:
+            return pd.to_datetime(".".join(bday), format="%d.%m.%Y")
+        else:
+            return None
+    df["bdate"].apply(bdate_year_parser)
+    now = pd.to_datetime('now')
+    df['age'] = (now.year - df['bdate'].dt.year) - ((now.month - df['bdate'].dt.month) < 0)
+    user_info_df = df
+    data = json.load(open("user_info.json", "r"))["users_likes"]
+    data_for_df = []
+    for i in data:
+        data_for_df.extend(list(zip([i]*len(data[i]), map(str, data[i]))))
+    post_likes_df = pd.DataFrame(data_for_df, columns = ["post_id", "user_id"])
+    return user_info_df, post_likes_df
