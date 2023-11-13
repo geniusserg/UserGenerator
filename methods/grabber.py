@@ -39,9 +39,6 @@ check_vk_api()
 
 ## Methods of grabbing info ##
 
-def user_process(df):
-    return df
-
 def user_request(user_id):
     params = {
         'user_ids': user_id,
@@ -58,7 +55,6 @@ def user_request(user_id):
                     education,
                     military,
                     followers_count,
-                    friend_status,
                     schools,
                     verified,
                     games,
@@ -122,42 +118,44 @@ def post_process(post):
     del post["short_text_rate"]
     del post["likes"]["can_like"]
     del post["likes"]["user_likes"]
-    # del post["id"]
-
     return post
 
 
-def get_items_of_page(group_id, count=10, offset=0):
-    params = {
-        'owner_id': '-' + group_id,
-        'count': count,
-        'offset': offset,
-        'access_token': access_token,
-        'v': '5.131',  # Версия VK API
-    }
-    response = requests.get(
-        'https://api.vk.com/method/wall.get',
-        params=params)
-    data = response.json()
+def get_items_of_page(group_id, count=10):
+    offset = 0
     like_data = []
     post_info = []
-    print("Start parsing")
-    if 'response' in data:
-        posts = data['response']['items']
-        for post in tqdm(posts):
-            # try:
-            post_processed = post_process(post=post)
-            # except:
-            #     print(f"Warning! cannot process item with id {str(post['id'])}")
-            post_info.append({"post_id": "-"+str(group_id)+"_"+str(post["id"]), "post_info": post_processed})
-            like_data.append({"post_id": str(post["id"]), "likes": likes_request(group_id, post["id"])})
-            time.sleep(0.4)
-    else:
-        print("Произошла ошибка")
-
+    while count > 0:
+        params = {
+            'owner_id': '-' + group_id,
+            'count': count,
+            'offset': offset,
+            'access_token': access_token,
+            'v': '5.131',  # Версия VK API
+        }
+        response = requests.get(
+            'https://api.vk.com/method/wall.get',
+            params=params)
+        data = response.json()
+        if 'response' in data:
+            posts = data['response']['items']
+            for post in tqdm(posts):
+                try:
+                    post_processed = post_process(post=post)
+                except:
+                    post_processed = {}
+                    pass
+                post_info.append({"post_id": "-"+str(group_id)+"_"+str(post["id"]), "post_info": post_processed})
+                like_data.append({"post_id": str(post["id"]), "likes": likes_request(group_id, post["id"])})
+                time.sleep(0.4)
+        else:
+            print(f"{count}, {offset} iteration: Произошла ошибка")
+        count -= 100; offset += 100
+        time.sleep(10)
     result = {"likes":like_data, "posts": post_info}
     return result
 
+## currently is not used
 def get_groups_user_follows(user_id):
     params = {
     'user_ids': user_id,
@@ -175,8 +173,6 @@ def get_groups_user_follows(user_id):
         print("WARNING", data)
         data = {}
     return data
-
-
 
 def likes_request(group_id, post_id):
     params = {
@@ -200,42 +196,15 @@ def likes_request(group_id, post_id):
         raise Exception(data)
     return list_of_likes
 
+# select active users. columns=users, index=posts
+def select_active_users(recsys_matrix, treshold=3):
+    return recsys_matrix.loc[:, (~recsys_matrix.isna()).sum()>treshold].columns
 
+import pickle
 # grab user profiles and their likes in current gr
-def grabb_group_info(group_id="31480508"):
-    iteraction_info = get_items_of_page(group_id=group_id, count=100)
-    result_recsys = {"group": group_id, "users_likes": iteraction_info[0], "user_reposts":  iteraction_info[1]}
-    result_tables = {"group": group_id, "user_info": iteraction_info[2]}
+def grabb_group_info(group_id, posts_count = 200):
+    iteraction_info = get_items_of_page(group_id=group_id, count=posts_count)
+    result_recsys = {"group": group_id, "users_likes": iteraction_info}
     with open("data/user_likes.json", "w") as f:
         json.dump(result_recsys, f)
-    with open("data/user_info.json", "w") as f:
-        json.dump(result_tables, f)
-    return True
-
-def preprocess_user():
-    df = json.load(open("data/user_info.json","r",encoding='utf-8'))["user_info"]
-    df = pd.json_normalize(df)
-    df = df.drop(columns=["can_access_closed", 
-                      "personal", 
-                      "relation_partner.id", 
-                      'relation_partner.first_name', 
-                      'relation_partner.last_name'])
-    df.loc[~pd.isna(df["relation"]) & (df["relation"]==0), "relation"] = None
-    def bdate_year_parser(bday):
-        if pd.isna(bday):
-            return None
-        bday = bday.split(".")
-        if len(bday) == 3:
-            return pd.to_datetime(".".join(bday), format="%d.%m.%Y")
-        else:
-            return None
-    df["bdate"].apply(bdate_year_parser)
-    now = pd.to_datetime('now')
-    df['age'] = (now.year - df['bdate'].dt.year) - ((now.month - df['bdate'].dt.month) < 0)
-    user_info_df = df
-    data = json.load(open("user_info.json", "r"))["users_likes"]
-    data_for_df = []
-    for i in data:
-        data_for_df.extend(list(zip([i]*len(data[i]), map(str, data[i]))))
-    post_likes_df = pd.DataFrame(data_for_df, columns = ["post_id", "user_id"])
-    return user_info_df, post_likes_df
+    return result_recsys

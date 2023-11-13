@@ -1,10 +1,4 @@
-from methods.sentiment_analysis import sentiment_analysis
-import pandas as pd
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from gensim import corpora, models
-from nltk.corpus import stopwords
-rus_stopwords = stopwords.words("russian")
+from methods.nlp_analysis import sentiment_analysis, tfidf_process_texts, lda_on_texts
 
 def extract_hastags(text):
     hashtag_list = []
@@ -50,11 +44,36 @@ def posts_transfrom_json_to_pandas(response_dict):
 
 def users_transfrom_json_to_pandas(response_dict):
     uinfodf = pd.json_normalize(response_dict)
-    for col in ["career", "military"]:
+    if ("relation_partner.id" in uinfodf.columns):
+        uinfodf.loc[:, "has_relations"] = (~uinfodf["relation_partner.id"].isna()).astype(int)
+    uinfodf.loc[~pd.isna(uinfodf["relation"]) & (uinfodf["relation"]==0), "relation"] = None
+    for col in ["career", "military", "schools", "universities"]:
+        print(col, uinfodf.loc[~uinfodf[col].isna(), col].shape)
         uinfodf.loc[~uinfodf[col].isna(), col] = uinfodf.loc[~uinfodf[col].isna(), col].apply(lambda x: x[-1] if (not isinstance(x, float) and len(x) > 0 ) else pd.NA)
         vcarer = pd.json_normalize(uinfodf[col])
-        uinfodf.loc[:, [i+f"_{col}" for i in vcarer.columns]] = vcarer
+        uinfodf.loc[:, [f"{col}__{i}" for i in vcarer.columns]] = vcarer
         uinfodf = uinfodf.drop(col, axis=1)
+    def bdate_year_parser(bday):
+        if pd.isna(bday):
+            return None
+        bday = bday.split(".")
+        if len(bday) == 3:
+            return pd.to_datetime(".".join(bday), format="%d.%m.%Y")
+        else:
+            return None
+    uinfodf["bdate"] = uinfodf["bdate"].apply(bdate_year_parser)
+    now = pd.to_datetime('now')
+    uinfodf['age'] = (now.year - uinfodf['bdate'].dt.year) - ((now.month - uinfodf['bdate'].dt.month) < 0)
+    
+    # delete columns
+    for col in ["can_access_closed", 
+                "relation_partner.id", 
+                'relation_partner.first_name', 
+                'relation_partner.last_name',
+                'personal.langs_full']:
+        if (col in uinfodf.columns):
+            uinfodf = uinfodf.drop(columns=col)
+    return uinfodf
 
 def likes_to_recsys_matrix(response_dict):
     dfres = []
