@@ -39,6 +39,8 @@ check_vk_api()
 
 ## Methods of grabbing info ##
 
+def user_process(df):
+    return df
 
 def user_request(user_id):
     params = {
@@ -82,10 +84,54 @@ def user_request(user_id):
     return data
 
 
-def get_items_of_page(group_id, count=10):
+def post_process(post):
+    if("owner_id" in post):
+        if(post["owner_id"]!=post["from_id"]):
+            post["owner"] = 0
+        else:
+            post["owner"] = 1
+    
+    # attachments
+    if("attachments" in post):
+        for attachment in post["attachments"]:
+            if("type" in attachment):
+                if (attachment["type"] == "video"):
+                    video = attachment["video"]
+                    if ("comments" in video):
+                        post["video_comments"] = video["comments"]
+                    if ("date" in video):
+                        post["video_date"] = video["date"]
+                    if ("duration" in video):
+                        post["video_duration"] = video["duration"]
+                    if ("description" in video):
+                        post["video_description"] = video["duration"]
+            if ("photo" in attachment):
+                if("type" in attachment):
+                    if (attachment["type"] == "photo"):
+                        photo = attachment["photo"]
+                        if ("text" in photo):
+                            post["photo_text"] = photo["text"]
+                        if ("date" in photo):
+                            post["photo_date"] = photo["date"]
+        del post["attachments"]
+    del post["hash"]
+    del post["from_id"]
+    del post["owner_id"]
+    del post["type"]
+    del post["inner_type"]
+    del post["short_text_rate"]
+    del post["likes"]["can_like"]
+    del post["likes"]["user_likes"]
+    # del post["id"]
+
+    return post
+
+
+def get_items_of_page(group_id, count=10, offset=0):
     params = {
         'owner_id': '-' + group_id,
         'count': count,
+        'offset': offset,
         'access_token': access_token,
         'v': '5.131',  # Версия VK API
     }
@@ -93,23 +139,24 @@ def get_items_of_page(group_id, count=10):
         'https://api.vk.com/method/wall.get',
         params=params)
     data = response.json()
-    like_data = {}
-    users_set = set()
-    user_info = []
+    like_data = []
+    post_info = []
+    print("Start parsing")
     if 'response' in data:
         posts = data['response']['items']
-        print(posts[0]["id"])
         for post in tqdm(posts):
-            user_likes = likes_request(group_id, post["id"])
-            like_data[str(post["id"])] = user_likes
-            users_set.update(user_likes)
-            time.sleep(0.4)
-        for user in tqdm(list(users_set)):
-            user_info.append(user_request(user))
+            # try:
+            post_processed = post_process(post=post)
+            # except:
+            #     print(f"Warning! cannot process item with id {str(post['id'])}")
+            post_info.append({"post_id": "-"+str(group_id)+"_"+str(post["id"]), "post_info": post_processed})
+            like_data.append({"post_id": str(post["id"]), "likes": likes_request(group_id, post["id"])})
             time.sleep(0.4)
     else:
         print("Произошла ошибка")
-    return like_data, list(users_set), user_info
+
+    result = {"likes":like_data, "posts": post_info}
+    return result
 
 def get_groups_user_follows(user_id):
     params = {
@@ -153,10 +200,11 @@ def likes_request(group_id, post_id):
         raise Exception(data)
     return list_of_likes
 
+
 # grab user profiles and their likes in current gr
-def grabb_users_and_likes(group_id="94"):
+def grabb_group_info(group_id="31480508"):
     iteraction_info = get_items_of_page(group_id=group_id, count=100)
-    result_recsys = {"group": group_id, "users_likes": iteraction_info[0]}
+    result_recsys = {"group": group_id, "users_likes": iteraction_info[0], "user_reposts":  iteraction_info[1]}
     result_tables = {"group": group_id, "user_info": iteraction_info[2]}
     with open("data/user_likes.json", "w") as f:
         json.dump(result_recsys, f)
@@ -164,7 +212,7 @@ def grabb_users_and_likes(group_id="94"):
         json.dump(result_tables, f)
     return True
 
-def preprocess_tabular_data():
+def preprocess_user():
     df = json.load(open("data/user_info.json","r",encoding='utf-8'))["user_info"]
     df = pd.json_normalize(df)
     df = df.drop(columns=["can_access_closed", 
