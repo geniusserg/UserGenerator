@@ -3,6 +3,9 @@ import time
 import requests
 from tqdm import tqdm
 import pandas as pd
+from methods.pandas_process import posts_transfrom_json_to_pandas
+from methods.pandas_process import likes_to_recsys_matrix
+from methods.pandas_process import users_transfrom_json_to_pandas
 
 try:
     auth = json.load(open("access_token.json", "r"))
@@ -72,7 +75,7 @@ def user_request(user_id):
         'https://api.vk.com/method/users.get',
         params=params, timeout=50)
     data = response.json()
-    if ('response' in data):
+    if ('response' in data and isinstance(data['response'], list) and len(data['response'])>0):
         data = data['response'][0]
     else:
         print("WARNING", data)
@@ -145,8 +148,12 @@ def get_items_of_page(group_id, count=10):
                 except:
                     post_processed = {}
                     pass
-                post_info.append({"post_id": "-"+str(group_id)+"_"+str(post["id"]), "post_info": post_processed})
-                like_data.append({"post_id": str(post["id"]), "likes": likes_request(group_id, post["id"])})
+                orig_post_id = post["id"]
+                post_processed["id"] = str(group_id)+"_"+str(post_processed["id"])
+                post_processed["post_id"] = str(post_processed["id"])
+                post_processed["group_id"] = str(group_id)
+                like_data.append({"post_id": post_processed["id"], "likes": likes_request(group_id, orig_post_id)})
+                post_info.append(post_processed)
                 time.sleep(0.4)
         else:
             print(f"{count}, {offset} iteration: Произошла ошибка")
@@ -200,11 +207,36 @@ def likes_request(group_id, post_id):
 def select_active_users(recsys_matrix, treshold=3):
     return recsys_matrix.loc[:, (~recsys_matrix.isna()).sum()>treshold].columns
 
-import pickle
-# grab user profiles and their likes in current gr
-def grabb_group_info(group_id, posts_count = 200):
+# threshold for likes count -> 
+def get_active_user_info(recsys_matrix, threshold = 3):
+    active_users = recsys_matrix.loc[:, (~recsys_matrix.isna()).sum() >= threshold].columns
+    users_info = []
+    for j in tqdm(active_users):
+        users_info.append(grabber.user_request(j))
+        time.sleep(0.4)
+    df = users_transfrom_json_to_pandas(users_info)
+    return df
+
+####
+# Function which collect posts from group, 
+# users who liked that posts and information about that users.
+# Input arguments: group_id, count of posts, 
+# likes caount (function will collect users who liked more than likes'-treshold times)
+# Output: 3 csvs in data folder - posts.csv, like_matrix.csv, users.csv
+####
+
+def grabb_group_info(group_id, posts_count = 100, likes_treshold=5):
     iteraction_info = get_items_of_page(group_id=group_id, count=posts_count)
-    result_recsys = {"group": group_id, "users_likes": iteraction_info}
+    result_recsys = {"group": group_id, "likes": iteraction_info["likes"], "posts": iteraction_info["posts"]}
     with open("data/user_likes.json", "w") as f:
-        json.dump(result_recsys, f)
+        json.dump(result_recsys, f) # save unprocessed result to json
+    # post info to csv
+    posts_info = posts_transfrom_json_to_pandas(f["posts"])
+    posts_info.to_csv("data/posts.csv")
+    #likes matrix
+    recsys_matrix = likes_to_recsys_matrix(f["likes"])
+    recsys_matrix.to_csv("data/like_matrix.csv")
+    # users information who actively like posts (more than 6 likes on posts_count)
+    users_df = get_active_user_info(recsys_matrix, 6)
+    users_df.to_csv("data/users.csv")
     return result_recsys

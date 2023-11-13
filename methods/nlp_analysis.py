@@ -37,3 +37,9 @@ def lda_on_texts(texts, num_topics=5):
         topics_for_texts.append(topics)
     return topics_for_texts
 
+def extract_hashtags(text):
+    hashtag_list = []
+    for word in text.split():
+        if word[0] == '#':
+            hashtag_list.append(word[1:])
+    return hashtag_list
