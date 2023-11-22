@@ -45,7 +45,9 @@ def users_transfrom_json_to_pandas(response):
         if pd.isna(bday):
             return None
         bday = bday.split(".")
-        return pd.to_datetime(".".join(bday), format="%d.%m.%Y") if (len(bday) == 3) else None
+        date = pd.to_datetime(".".join(bday), format="%d.%m.%Y") if (len(bday) == 3) else pd.to_datetime(".".join(bday), dayfirst=True, format="%d.%m")
+        return date
+    
     uinfodf.loc[:, "bdate"] = uinfodf["bdate"].apply(bdate_year_parser)
     now = pd.to_datetime('now')
     uinfodf.loc[~uinfodf["bdate"].isna(), 'age'] = uinfodf.loc[~uinfodf["bdate"].isna(), 'bdate'].apply(lambda x: (now.year - x.year) - ((now.month - x.month) < 0))
@@ -68,5 +70,4 @@ def likes_to_recsys_matrix(response):
         for j in i["likes"]:
             dfres.append([postid, j])
     df = pd.DataFrame(dfres)
-    sparse_matrix = df.pivot_table(index=0, columns=1, aggfunc="size") # remove later, memory consuming
-    return sparse_matrix
+    return df

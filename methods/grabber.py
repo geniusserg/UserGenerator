@@ -225,7 +225,7 @@ def get_active_user_info(recsys_matrix, threshold = 3):
 # Output: 3 csvs in data folder - posts.csv, like_matrix.csv, users.csv
 ####
 
-def grabb_group_info(group_id, posts_count = 100, likes_treshold=5):
+def grabb_group_info(group_id, posts_count = 100):
     iteraction_info = get_items_of_page(group_id=group_id, count=posts_count)
     result_recsys = {"group": group_id, "likes": iteraction_info["likes"], "posts": iteraction_info["posts"]}
     with open("data/user_likes.json", "w") as f:
@@ -236,7 +236,4 @@ def grabb_group_info(group_id, posts_count = 100, likes_treshold=5):
     #likes matrix
     recsys_matrix = likes_to_recsys_matrix(f["likes"])
     recsys_matrix.to_csv("data/like_matrix.csv")
-    # users information who actively like posts (more than 6 likes on posts_count)
-    users_df = get_active_user_info(recsys_matrix, 6)
-    users_df.to_csv("data/users.csv")
     return result_recsys
